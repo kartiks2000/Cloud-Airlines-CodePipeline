@@ -1,0 +1,23 @@
+---
+- name: Configure Jenkins Worker Node
+  hosts: workers   # Update with the appropriate host group
+  become: yes
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install Java (OpenJDK)
+      apt:
+        name: openjdk-11-jdk
+        state: present
+
+    - name: Create Jenkins agent directory
+      file:
+        path:  /var/lib/jenkins
+        state: directory
+        owner: ubuntu
+        group: sudo
+
+

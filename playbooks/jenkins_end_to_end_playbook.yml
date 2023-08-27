@@ -1,0 +1,150 @@
+---
+- name: End-to-End Jenkins Setup
+  hosts: master
+  become: yes  # Run tasks with sudo privileges
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install OpenJDK
+      apt:
+        name: openjdk-11-jdk
+        state: present
+
+    - name: Add Jenkins repository key
+      apt_key:
+        url: https://pkg.jenkins.io/debian/jenkins.io.key
+        state: present
+
+    - name: Add Jenkins repository
+      apt_repository:
+        repo: deb http://pkg.jenkins.io/debian-stable binary/
+        state: present
+
+    - name: Install Jenkins
+      apt:
+        name: jenkins
+        state: present
+
+    - name: Start Jenkins service
+      service:
+        name: jenkins
+        state: started
+        enabled: yes
+
+    - name: Wait for Jenkins to start
+      wait_for:
+        host: localhost
+        port: 8080
+        delay: 10
+        timeout: 300
+
+    - name: Retrieve Initial Admin Password
+      command: cat /var/lib/jenkins/secrets/initialAdminPassword
+      register: initial_admin_password
+
+    - name: Print initial admin password
+      debug:
+        var: initial_admin_password.stdout
+
+    - name: Debug Initial Admin Password
+      debug:
+        var: initial_admin_password.stdout
+      when: initial_admin_password.stdout is defined
+
+    - name: Create Admin User
+      uri:
+        url: http://localhost:8080/setupWizard/createAdminUser
+        method: POST
+        body: |
+          username=admin
+          password=admin
+          confirmPassword=admin
+          fullname=Administrator
+          email=admin@example.com
+        return_content: yes
+        status_code: 302
+      register: create_admin_response
+
+    # - name: Download the Jenkins CLI JAR file
+    #   get_url:
+    #     url: http://localhost:8080/jnlpJars/jenkins-cli.jar
+    #     dest: /var/lib/jenkins/jenkins-cli.jar
+
+    - name: Get Jenkins CSRF Protection Crumb
+      uri:
+        url: http://localhost:8080/crumbIssuer/api/json
+        method: GET
+        return_content: yes
+      register: crumb_response
+
+    - set_fact:
+        jenkins_crumb: "{{ crumb_response.json.crumb }}"
+
+    - name: Create Admin User
+      uri:
+        url: http://localhost:8080/setupWizard/createAdminUser
+        method: POST
+        headers:
+          Content-Type: "application/x-www-form-urlencoded"
+          Jenkins-Crumb: "{{ jenkins_crumb }}"
+        body: |
+          username=admin
+          password=admin
+          confirmPassword=admin
+          fullname=Administrator
+          email=admin@example.com
+        return_content: yes
+        status_code: 302
+      register: create_admin_response
+
+    # - name: Create Jenkins User
+    #   command: java -jar /var/lib/jenkins/jenkins-cli.jar -s http://localhost:8080 -auth admin:admin create-user --username admin --password admin --fullname "test" --email test@example.com
+
+    - name: Debug Create Admin Response
+      debug:
+        var: create_admin_response
+
+    - name: Generate API Token
+      uri:
+        url: http://localhost:8080/user/admin/configure
+        method: POST
+        headers:
+          Content-Type: "application/x-www-form-urlencoded"
+          Authorization: "Basic {{ 'admin:' + 'admin' | b64encode | decode('utf-8') }}"
+        body: |
+          json={
+            "_.apiTokenGenerationWebhookEndpointEnabled": "true"
+          }
+        return_content: yes
+      register: api_token_generation_response
+
+    - name: Debug API Token Generation Response
+      debug:
+        var: api_token_generation_response
+
+    # - name: Install recommended plugins
+    #   community.general.jenkins_plugin:
+    #     name: suggested
+    #     state: present
+    #     timeout: 120
+    #     jenkins_url: http://localhost:8080  # Replace with your Jenkins URL
+    #     jenkins_user: admin  # Your Jenkins username
+    #     jenkins_password: admin  # Your Jenkins API token
+
+    # - name: Create Jenkins user and set password
+    #   community.general.jenkins_script:
+    #     script: |
+    #       import jenkins.security.UserDetails
+    #       def user = hudson.model.User.getById("admin", false)
+    #       user.addProperty(new hudson.tasks.Mailer.UserProperty("admin@example.com"))
+    #       user.save()
+    #       user.updatePassword("123456")
+    #   become: yes
+
+    # - name: Restart Jenkins service
+    #   service:
+    #     name: jenkins
+    #     state: restarted
